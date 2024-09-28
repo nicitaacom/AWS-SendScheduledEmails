@@ -1,6 +1,6 @@
 {
   "devDependencies": {
-    "@types/node": "^22.2.0",
+    "@types/node": "^22.7.4",
     "@types/react": "^18.3.3"
   },
   "dependencies": {

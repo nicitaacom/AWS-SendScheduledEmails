@@ -1,6 +1,7 @@
 import moment from 'moment-timezone';
 import { supabaseAdmin } from './dist/libs/supabaseAdmin.js'
-import { resend } from './dist/libs/resend.js'
+import { Resend } from "resend"
+import { decryptResend } from './dist/utils/decryptResend.js'
 
 // render email using this function because you need each time render email async on client (on server .tsx not avaiable)
 // DO NOT INSERT NEW LINES HERE - it may casuse unexpected output (its better to don't change this function - you may do it but do some backup before)
@@ -74,9 +75,18 @@ export const handler = async (event) => {
     }
 
 
+  // 1. sendEmailAction
+  // 1.1 Create Resend SDK instance
+  const decryptedEnvResend = await decryptResend(encryptedEnvsClient)
+  if (typeof decryptedEnvResend === 'string') {
+    return decryptedEnvResend
+  }
 
-    // 1. sendEmailAction
-    const { error } = await resend.emails.send(emailData)
+
+  const resend = new Resend(decryptedEnvResend.value)
+
+  // 1.2 Send email
+  const { error } = await resend.emails.send(emailData)
     if (error) {
         return {
         statusCode: 400,
