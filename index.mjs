@@ -1,11 +1,47 @@
 import moment from 'moment-timezone';
-import { supabaseAdmin } from './dist/libs/supabaseAdmin.js'
 import { Resend } from "resend"
+import { supabaseAdmin } from './dist/libs/supabaseAdmin.js'
 import { decryptResend } from './dist/utils/decryptResend.js'
 
 // render email using this function because you need each time render email async on client (on server .tsx not avaiable)
 // DO NOT INSERT NEW LINES HERE - it may casuse unexpected output (its better to don't change this function - you may do it but do some backup before)
-function renderedEmailString(body, email) {
+// TODO - emailFrom.split("@")[0] - name in the future - e.g "someName <someemail@domain.com>"
+function renderedReplyEmailString(intialEmail, body, emailTo, emailFrom, image, scheduled_at) {
+  moment.locale('en');
+  const berlinTime = moment(scheduled_at).tz('Europe/Berlin');
+  const formattedDate = berlinTime.format('D MMMM YYYY, HH:mm:ss');
+
+  return `
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+<table>
+  <tbody>
+    <tr>
+      <td>
+       <p style="white-space: pre-wrap; word-break: break-word; margin: 0 0 8px 0;">${intialEmail.trim()}</p>
+      <div><br /></div>
+                                    <div><i><span style="font-size:10pt;line-height:12pt;"><span style="font-family:Arial;">
+                                                    ${formattedDate}, from ${emailFrom.split("@")[0]} <${emailFrom}>:
+                                                </span></span></i></div>
+                                    <div><br /></div>
+                                    <blockquote style="border-left:1px solid rgb(204, 204, 204);margin:0px 0px 0px 0.8ex;padding-left:1ex;" data-darkreader-inline-border-left="">
+                                        <div style="display:block;">
+                                            <p style="white-space: pre-wrap; word-break: break-word; margin: 0 0 8px 0;">${body.trim()}</p>
+                                            ${image && `<img src=${image} alt="email-image" />`}
+                                        </div>
+                                    </blockquote>
+
+
+                                </span></div>
+        <p style="font-size: 14px; white-space: pre-wrap; word-break: break-word; margin: 0;">If you no longer wish to receive these emails -&nbsp;<a href="https://ns-agency.eu/unsubscribe?email=${encodeURIComponent(emailTo)}" target="_blank" style="color: blue; text-decoration: underline; --darkreader-inline-color: #337dff;" data-link-id="3" rel="noopener noreferrer" data-darkreader-inline-color="">unsubscribe</a></p>
+      </td>
+    </tr>
+  </tbody>
+</table>`;
+}
+
+/**
+ * 
+ function renderedEmailString(body, email) {
   return `
 <!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
 <table>
@@ -19,6 +55,9 @@ function renderedEmailString(body, email) {
   </tbody>
 </table>`;
 }
+
+ */
+
 export const handler = async (event) => {
 
   // normally I need to create schedule using cloudWatch SDK and pass this payload
@@ -26,21 +65,26 @@ export const handler = async (event) => {
 
   const {data} = await supabaseAdmin.from('outreach_scheduled').select().order('scheduled_at',{ascending:true}).limit(1).single()
 
-
+  if (!data) {
+    return {
+      statusCode: 200,
+      body: JSON.stringify({ message: `no scheduled emails` }),
+    };
+  }
   if (!data.id) {
-         return {
+      return {
         statusCode: 400,
         body: JSON.stringify({ error: `id missing` }),
       };
   }
   if (!data.scheduled_at) {
-         return {
+      return {
         statusCode: 400,
         body: JSON.stringify({ error: `scheduledAtISO missing` }),
       };
   }
     if (!data.scheduled_from) {
-         return {
+      return {
         statusCode: 400,
         body: JSON.stringify({ error: `emailFrom missing` }),
       };
@@ -71,13 +115,19 @@ export const handler = async (event) => {
       from: data.scheduled_from,
       to: data.scheduled_to,
       subject: data.scheduled_subject_line,
-      html: renderedEmailString(data.scheduled_body,data.scheduled_to)
+      html: renderedReplyEmailString(
+        data.initial_email_body,
+        data.scheduled_body,
+        data.scheduled_to,
+        data.scheduled_from,
+        data.scheduled_image_url,
+        data.scheduled_at)
     }
 
 
   // 1. sendEmailAction
   // 1.1 Create Resend SDK instance
-  const decryptedEnvResend = await decryptResend(encryptedEnvsClient)
+  const decryptedEnvResend = await decryptResend(data.encrypted_resend)
   if (typeof decryptedEnvResend === 'string') {
     return decryptedEnvResend
   }
@@ -151,7 +201,14 @@ export const handler = async (event) => {
 
 
 
-    // 4. deleteDBScheduledEmailAction
+
+  // 4. insertSentAction
+  await supabaseAdmin
+          .from("sent")
+          .insert({ subject:`follow-up-${data.scheduled_subject_line}`, body:data.scheduled_body, sent_to:data.scheduled_to, sent_from:data.scheduled_from  })
+
+
+    // 5. deleteDBScheduledEmailAction
   await supabaseAdmin.from("outreach_scheduled").delete().eq("id", data.id).single()
 
       
